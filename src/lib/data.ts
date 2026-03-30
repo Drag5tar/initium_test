@@ -47,3 +47,16 @@ export const shopNames = [
     'Kari', 'Цветочный Рай', 'Мир Подарков', 'Fix Price', 'Семья', 'Винный Клуб',
     'Табачная Лавка', 'Суши Маркет', 'Sushi Wok', 'Burger Club', 'Pasta House', 'Pizza Time'
 ];
+
+export const shopColors = [
+    0x6B7F8F,
+    0x7A8C9A,
+    0x5D7285,
+    0x8C9EAB,
+    0x708494,
+    0x97A9B5,
+    0x7F8F9C, 
+    0x658092,
+    0x8DA0AE,
+    0x5F7488
+];

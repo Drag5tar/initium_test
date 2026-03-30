@@ -15,7 +15,7 @@ export const Plan = () => {
     }, [containerRef, data, map]);
 
     return (
-        <section ref={containerRef}>
+        <section className="fh" ref={containerRef}>
 
         </section>
     )
