@@ -9,7 +9,11 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { InstanceGroups, ModifiedShop, Shop } from "../lib/types";
 import { PlacementEngine } from "./PlacementEngine";
 import { throttle } from "../lib/helpers";
-import { PositionAnimationEngine } from "./AnimationEngine";
+import { PerspectiveSwitch } from "./AnimationEngine";
+// import {
+//   CameraAnimationEngine,
+//   type PositionAnimation,
+// } from "./AnimationEngine";
 
 export class MapEngine {
   private readonly container: HTMLElement;
@@ -25,11 +29,12 @@ export class MapEngine {
   ortographicCamera!: THREE.OrthographicCamera;
   perspectiveCamera!: THREE.PerspectiveCamera;
   camera!: THREE.OrthographicCamera | THREE.PerspectiveCamera;
-  activeCamera: "2d" | "3d" = "2d";
   topViewPoint: THREE.Vector3 = new THREE.Vector3(0, 0, 0);
-  perspectiveViewPoint: THREE.Vector3 = new THREE.Vector3(0, 20, 55);
+  perspectiveViewPoint: THREE.Vector3 = new THREE.Vector3(-45, 60, -55);
+  topViewRotation: THREE.Quaternion = new THREE.Quaternion();
+  perspectiveViewRotation: THREE.Quaternion = new THREE.Quaternion();
   middlePoint: THREE.Vector3 = new THREE.Vector3(0, 0, 0);
-  animationEngine: PositionAnimationEngine = new PositionAnimationEngine();
+  perspectiveSwitch!: PerspectiveSwitch;
 
   stats = new Stats();
 
@@ -83,7 +88,9 @@ export class MapEngine {
       throttle(this.onMouseMove.bind(this), 5)(e),
     );
     this.container.addEventListener("click", this.onClick.bind(this));
-    this.container.addEventListener("keyup", () => {this.toggleView()});
+    document.body.addEventListener("keyup", (e) => {
+      this.toggleView(e);
+    });
 
     this.generateGeometry();
   }
@@ -156,36 +163,54 @@ export class MapEngine {
     this.topViewPoint.y = 100;
     this.middlePoint.y = 0;
     this.perspectiveCamera = new THREE.PerspectiveCamera(
-      50,
+      35,
       window.innerWidth / window.innerHeight,
       0.1,
       1000,
     );
-    const firstObjectPosition = this.placementEngine.getFirstObjectPosition();
-    const lastObjectPosition = this.placementEngine.getMaxPosition();
-    const scaleMultiplier = 20;
+    // const scaleMultiplier = 20;
     this.ortographicCamera = new THREE.OrthographicCamera(
-      // -100, 100, 100, -100,
-      this.sceneSize.width / -scaleMultiplier,
-      this.sceneSize.width / scaleMultiplier,
-      this.sceneSize.height / scaleMultiplier,
-      this.sceneSize.height / -scaleMultiplier,
+      this.sceneSize.width / -2,
+      this.sceneSize.width / 2,
+      this.sceneSize.height / 2,
+      this.sceneSize.height / -2,
       -500,
       1500,
     );
-    this.camera =
-      this.activeCamera === "2d"
-        ? this.ortographicCamera
-        : this.perspectiveCamera;
-    this.camera.position.set(
-      this.topViewPoint.x,
-      this.topViewPoint.y,
-      this.topViewPoint.z,
-    );
-    this.camera.lookAt(this.middlePoint);
+    this.ortographicCamera.zoom = 10;
+    this.perspectiveCamera.position.copy(this.perspectiveViewPoint);
+    this.ortographicCamera.position.copy(this.topViewPoint);
+    this.perspectiveCamera.lookAt(this.middlePoint);
+    this.ortographicCamera.lookAt(this.middlePoint);
+    this.perspectiveCamera.updateProjectionMatrix();
+    this.ortographicCamera.updateProjectionMatrix();
     this.scene.add(this.perspectiveCamera);
     this.scene.add(this.ortographicCamera);
-    console.log(this.camera);
+    this.perspectiveSwitch = new PerspectiveSwitch(
+      {
+        "2d": {
+          camera: this.ortographicCamera,
+        },
+        "3d": {
+          camera: this.perspectiveCamera,
+        },
+      },
+      "3d",
+    );
+    this.perspectiveSwitch.getCamera();
+    // const upVector = new THREE.Vector3(0, 10, 0);
+    // const topViewMatrix = new THREE.Matrix4().lookAt(
+    //   this.topViewPoint,
+    //   this.middlePoint,
+    //   upVector,
+    // );
+    // const perspectiveViewMatrix = new THREE.Matrix4().lookAt(
+    //   this.perspectiveViewPoint,
+    //   this.middlePoint,
+    //   upVector,
+    // );
+    // this.topViewRotation.setFromRotationMatrix(topViewMatrix);
+    // this.perspectiveViewRotation.setFromRotationMatrix(perspectiveViewMatrix);
   }
 
   setShopColor(shop: ModifiedShop, color: number) {
@@ -207,7 +232,8 @@ export class MapEngine {
   }
 
   checkIntersections() {
-    this.raycaster.setFromCamera(this.mouse, this.camera);
+    console.log('checking intersections');
+    this.raycaster.setFromCamera(this.mouse, this.perspectiveSwitch.getCamera());
 
     const intersections = this.raycaster.intersectObjects(
       this.instanceGroupsMeshes,
@@ -237,13 +263,14 @@ export class MapEngine {
   }
 
   private animate() {
-    this.renderer.render(this.scene, this.camera);
+    this.renderer.render(this.scene, this.perspectiveSwitch.getCamera());
+    this.perspectiveSwitch?.update();
     this.stats.update();
   }
 
   onWindowResize() {
     this.perspectiveCamera.aspect = window.innerWidth / window.innerHeight;
-    this.camera.updateProjectionMatrix();
+    this.perspectiveSwitch.getCamera().updateProjectionMatrix();
 
     this.renderer.setSize(window.innerWidth, window.innerHeight);
   }
@@ -278,8 +305,25 @@ export class MapEngine {
     this.animate();
   }
 
+//   resetInactiveCamera() {
+//     const camera =
+//       this.activeCamera === "2d"
+//         ? this.perspectiveCamera
+//         : this.ortographicCamera;
+//     if (this.activeCamera === "2d") {
+//       camera.position.copy(this.perspectiveViewPoint);
+//       camera.quaternion.copy(this.perspectiveViewRotation);
+//     } else {
+//       camera.position.copy(this.topViewPoint);
+//       camera.quaternion.copy(this.topViewRotation);
+//     }
+//   }
+
   toggleView(e: KeyboardEvent) {
-    if (e.code !== 'Space') return;
+    console.log(e);
+    if (e.code !== "Space") return;
     e.preventDefault();
+    console.log(this.camera);
+    this.perspectiveSwitch?.changePerspective()
   }
 }

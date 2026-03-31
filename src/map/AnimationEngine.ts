@@ -1,55 +1,198 @@
 import * as THREE from "three";
 
-export type PositionAnimation = {
-    startPosition: THREE.Vector3,
-    endPosition: THREE.Vector3,
-    startRotation: THREE.Euler,
-    endRotation: THREE.Euler,
-    animationProgress: number,
-    onStart: <T extends (...args: Parameters<T>[]) => unknown>() => unknown,
-    onEnd: <T extends (...args: Parameters<T>[]) => unknown>() => unknown,
-    target: THREE.Object3D | THREE.Camera,
-    delta: number
-}
+export type CameraPositionParameters = {
+  coordinates: THREE.Vector3;
+  rotation: THREE.Quaternion;
+  fov?: number;
+};
 
-export class PositionAnimationEngine {
-    private animationQueue: PositionAnimation[] = [];
-    private currentAnimation?: PositionAnimation;
+export type PerspectiveList = "2d" | "3d";
 
-    constructor() {
+export type CameraData = {
+  camera: THREE.PerspectiveCamera | THREE.OrthographicCamera;
+  defaultPosition?: CameraPositionParameters;
+};
 
+export type Perspectives = Record<PerspectiveList, CameraData>;
+
+export type PerspectiveAnimationData = {
+  perspective: CameraPositionParameters;
+  targetPerspective: CameraPositionParameters;
+  progress: number;
+  switchAtTheEnd?: PerspectiveList;
+};
+
+export class PerspectiveSwitch {
+  private perspectives!: Perspectives;
+  private timer: THREE.Timer = new THREE.Timer();
+  private animation?: PerspectiveAnimationData;
+  currentPerspective!: PerspectiveList;
+
+  constructor(perspectives: Perspectives, currentPerspective: PerspectiveList) {
+    this.perspectives = perspectives;
+    this.currentPerspective = currentPerspective;
+    this.init();
+  }
+
+  init() {
+    for (const [key] of Object.entries(this.perspectives)) {
+      const perspective = this.perspectives[key as PerspectiveList];
+      perspective.defaultPosition = {
+        coordinates: perspective.camera.position.clone(),
+        rotation: perspective.camera.quaternion.clone(),
+      };
+      if (perspective.camera instanceof THREE.PerspectiveCamera) {
+        perspective.defaultPosition.fov = perspective.camera.fov;
+      }
     }
+  }
 
-    addAnimation(anim: PositionAnimation) {
-        if (this.animationQueue.includes(anim)) return;
-        this.animationQueue.push(anim);
+  resetCamera(perspective: CameraData) {
+    const { camera, defaultPosition } = perspective;
+    if (!defaultPosition)
+      throw "Trying to reset a camera with no default position";
+    camera.position.copy(defaultPosition.coordinates);
+    camera.quaternion.copy(defaultPosition.rotation);
+    if (camera instanceof THREE.PerspectiveCamera && defaultPosition.fov) {
+      camera.fov = defaultPosition.fov;
     }
+  }
 
-    onAnimationEnd() {
-        this.currentAnimation = undefined;
-        this.animationQueue.shift();
+  copyCameraPosition(
+    perspective: CameraData,
+    targetPerspective: CameraData,
+    fov?: number,
+  ) {
+    if (!perspective.defaultPosition || !targetPerspective.defaultPosition)
+      return;
+    perspective.camera.position.copy(
+      targetPerspective.defaultPosition.coordinates,
+    );
+    perspective.camera.quaternion.copy(
+      targetPerspective.defaultPosition.rotation,
+    );
+    if (
+      targetPerspective.camera instanceof THREE.PerspectiveCamera &&
+      perspective.camera instanceof THREE.PerspectiveCamera
+    ) {
+      perspective.camera.fov = fov || targetPerspective.camera.fov;
     }
-    
-    onAnimationStart() {
-        
+  }
+
+  getNextPerspective() {
+    const perspectives = Object.keys(this.perspectives) as PerspectiveList[];
+    const currentPerspectiveIndex = perspectives.indexOf(
+      this.currentPerspective,
+    );
+    if (currentPerspectiveIndex >= perspectives.length - 1) {
+      return perspectives[0];
+    } else {
+      return perspectives[currentPerspectiveIndex + 1];
     }
+  }
 
-    public update() {
-        if (!this.currentAnimation) return;
-        let {animationProgress} = this.currentAnimation;
-        const {target, delta, onStart, onEnd, startPosition, endPosition, startRotation, endRotation} = this.currentAnimation;
-        if (animationProgress === 0) onStart();
-        animationProgress += delta;
-        target.position.lerpVectors(startPosition, endPosition, animationProgress);
-        const fromQuat = new THREE.Quaternion().setFromEuler(startRotation);
-        const toQuat = new THREE.Quaternion().setFromEuler(endRotation);
-        const currentQuat = new THREE.Quaternion().slerpQuaternions(fromQuat, toQuat, animationProgress);
-        target.rotation.setFromQuaternion(currentQuat);
-        if (animationProgress >= 1) {
-            this.onAnimationEnd();
-            onEnd();
-        }
+  changePerspective(
+    targetPerspective?: PerspectiveList,
+  ): THREE.PerspectiveCamera | THREE.OrthographicCamera | undefined {
+    if (this.animation) return;
+    const target = targetPerspective || this.getNextPerspective();
+    console.log(this.perspectives, target, this.perspectives[target]);
+
+    const currentPerspectiveData = this.perspectives[this.currentPerspective];
+    const targetPerspectiveData = this.perspectives[target];
+    if (
+      targetPerspectiveData.camera instanceof THREE.OrthographicCamera &&
+      currentPerspectiveData.camera instanceof THREE.PerspectiveCamera
+    ) {
+      const animation: PerspectiveAnimationData = {
+        perspective: currentPerspectiveData.defaultPosition!,
+        targetPerspective: {
+          coordinates: targetPerspectiveData.defaultPosition!.coordinates,
+          rotation: targetPerspectiveData.defaultPosition!.rotation,
+          fov: 0,
+        },
+        progress: 0,
+        switchAtTheEnd: target,
+      };
+      this.animation = animation;
     }
+    if (
+      currentPerspectiveData.camera instanceof THREE.OrthographicCamera &&
+      targetPerspectiveData.camera instanceof THREE.PerspectiveCamera
+    ) {
+      this.copyCameraPosition(
+        targetPerspectiveData,
+        currentPerspectiveData,
+        90,
+      );
+      this.currentPerspective = target;
+      const animation: PerspectiveAnimationData = {
+        perspective: {
+          coordinates: currentPerspectiveData.defaultPosition!.coordinates,
+          rotation: currentPerspectiveData.defaultPosition!.rotation,
+          fov: 0,
+        },
+        targetPerspective: targetPerspectiveData.defaultPosition!,
+        progress: 0,
+      };
+      this.animation = animation;
+    }
+    this.timer.update();
+  }
 
+  getCamera() {
+    return this.perspectives[this.currentPerspective].camera;
+  }
 
+  onTransitionEnd() {
+    console.log("on end", this.animation);
+    if (this.animation?.switchAtTheEnd) {
+      const prevPerspecive = this.perspectives[this.currentPerspective];
+      this.currentPerspective = this.animation.switchAtTheEnd;
+      this.resetCamera(prevPerspecive);
+    }
+    this.animation = undefined;
+  }
+
+  private getFov(
+    startFov: number,
+    targetFov: number,
+    progress: number,
+  ): number {
+    return startFov + (targetFov - startFov) * progress;
+  }
+
+  public update() {
+    if (!this.animation) return;
+    this.timer.update();
+    const delta = this.timer.getDelta();
+    const { perspective, targetPerspective } = this.animation;
+    const camera = this.perspectives[this.currentPerspective].camera;
+    this.animation.progress += delta / 2;
+    const prog = this.cameraEasing(this.animation.progress);
+    console.log(prog);
+    if (prog >= 1) {
+      this.onTransitionEnd();
+      return;
+    }
+    camera.position.lerpVectors(
+      perspective.coordinates,
+      targetPerspective.coordinates,
+      prog,
+    );
+    camera.quaternion.slerpQuaternions(
+      perspective.rotation,
+      targetPerspective.rotation,
+      prog,
+    );
+    if (
+      camera instanceof THREE.PerspectiveCamera &&
+      perspective.fov !== undefined &&
+      targetPerspective.fov !== undefined
+    ) {
+      camera.fov = this.getFov(perspective.fov, targetPerspective.fov, prog);
+    }
+  }
+
+  private cameraEasing = (x: number) => Math.ceil(x * (2 - x) * 1000) / 1000;
 }
