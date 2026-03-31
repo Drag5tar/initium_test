@@ -17,7 +17,6 @@ import { PerspectiveSwitch } from "./AnimationEngine";
 
 export class MapEngine {
   private readonly container: HTMLElement;
-  private readonly data: ModifiedShop[];
   private sceneSize!: { width: number; height: number };
   renderer!: THREE.WebGLRenderer;
   scene!: THREE.Scene;
@@ -52,7 +51,7 @@ export class MapEngine {
   constructor(container: HTMLElement, data: Shop[]) {
     this.container = container;
     this.placementEngine.setMaxRowWidth(data.length / 2);
-    this.data = this.organizeData(data);
+    this.organizeData(data);
     this.init();
   }
 
