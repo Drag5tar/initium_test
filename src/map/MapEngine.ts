@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import Stats from "stats.js";
 import type { InstanceGroups, ModifiedShop, Shop } from "../lib/types";
 import { PlacementEngine } from "./PlacementEngine";
@@ -11,7 +11,7 @@ import { PerspectiveSwitch } from "./AnimationEngine";
 // } from "./AnimationEngine";
 
 export class MapEngine {
-  private data: ModifiedShop[] = [];
+//   private data: ModifiedShop[] = [];
   private readonly container: HTMLElement;
   private sceneSize!: { width: number; height: number };
   private renderer!: THREE.WebGLRenderer;
@@ -34,7 +34,6 @@ export class MapEngine {
   private stats = new Stats();
 
   private instanceGroups: InstanceGroups = {};
-  private instanceGroupsMeshes: THREE.InstancedMesh[] = [];
   private shopsGroup: THREE.Group = new THREE.Group();
   private lastHovered?: ModifiedShop;
   private selectedShop?: ModifiedShop;
@@ -48,7 +47,7 @@ export class MapEngine {
   constructor(container: HTMLElement, data: Shop[]) {
     this.container = container;
     this.placementEngine.setMaxRowWidth(Math.max(data.length / 5, 50));
-    this.data = this.organizeData(data);
+    this.organizeData(data);
     this.init();
   }
 
