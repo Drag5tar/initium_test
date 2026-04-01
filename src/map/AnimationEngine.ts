@@ -93,29 +93,35 @@ export class PerspectiveSwitch {
 
   changePerspective(
     targetPerspective?: PerspectiveList,
+    options?: { matchFov?: number },
   ): THREE.PerspectiveCamera | THREE.OrthographicCamera | undefined {
     if (this.animation) return;
     const target = targetPerspective || this.getNextPerspective();
-    console.log(this.perspectives, target, this.perspectives[target]);
 
     const currentPerspectiveData = this.perspectives[this.currentPerspective];
     const targetPerspectiveData = this.perspectives[target];
     if (
+      !currentPerspectiveData.defaultPosition ||
+      !targetPerspectiveData.defaultPosition
+    )
+      return;
+    const animation: PerspectiveAnimationData = {
+      perspective: currentPerspectiveData.defaultPosition,
+      targetPerspective: targetPerspectiveData.defaultPosition,
+      progress: 0,
+    };
+    if (
       targetPerspectiveData.camera instanceof THREE.OrthographicCamera &&
       currentPerspectiveData.camera instanceof THREE.PerspectiveCamera
     ) {
-      const animation: PerspectiveAnimationData = {
-        perspective: currentPerspectiveData.defaultPosition!,
-        targetPerspective: {
-          coordinates: targetPerspectiveData.defaultPosition!.coordinates,
-          rotation: targetPerspectiveData.defaultPosition!.rotation,
-          fov: 0,
-        },
-        progress: 0,
-        switchAtTheEnd: target,
+      animation.targetPerspective = {
+        coordinates: targetPerspectiveData.defaultPosition!.coordinates,
+        rotation: targetPerspectiveData.defaultPosition!.rotation,
+        fov: options?.matchFov ?? 90,
       };
-      this.animation = animation;
+      animation.switchAtTheEnd = target;
     }
+
     if (
       currentPerspectiveData.camera instanceof THREE.OrthographicCamera &&
       targetPerspectiveData.camera instanceof THREE.PerspectiveCamera
@@ -123,20 +129,16 @@ export class PerspectiveSwitch {
       this.copyCameraPosition(
         targetPerspectiveData,
         currentPerspectiveData,
-        90,
+        options?.matchFov ?? 90,
       );
       this.currentPerspective = target;
-      const animation: PerspectiveAnimationData = {
-        perspective: {
-          coordinates: currentPerspectiveData.defaultPosition!.coordinates,
-          rotation: currentPerspectiveData.defaultPosition!.rotation,
-          fov: 0,
-        },
-        targetPerspective: targetPerspectiveData.defaultPosition!,
-        progress: 0,
+      animation.perspective = {
+        coordinates: currentPerspectiveData.defaultPosition!.coordinates,
+        rotation: currentPerspectiveData.defaultPosition!.rotation,
+        fov: options?.matchFov ?? 90,
       };
-      this.animation = animation;
     }
+    this.animation = animation;
     this.timer.update();
   }
 
@@ -147,9 +149,7 @@ export class PerspectiveSwitch {
   onTransitionEnd() {
     console.log("on end", this.animation);
     if (this.animation?.switchAtTheEnd) {
-      const prevPerspecive = this.perspectives[this.currentPerspective];
       this.currentPerspective = this.animation.switchAtTheEnd;
-      this.resetCamera(prevPerspecive);
     }
     this.animation = undefined;
   }
@@ -170,7 +170,6 @@ export class PerspectiveSwitch {
     const camera = this.perspectives[this.currentPerspective].camera;
     this.animation.progress += delta / 2;
     const prog = this.cameraEasing(this.animation.progress);
-    console.log(prog);
     if (prog >= 1) {
       this.onTransitionEnd();
       return;
@@ -192,6 +191,7 @@ export class PerspectiveSwitch {
     ) {
       camera.fov = this.getFov(perspective.fov, targetPerspective.fov, prog);
     }
+    camera.updateProjectionMatrix();
   }
 
   private cameraEasing = (x: number) => Math.ceil(x * (2 - x) * 1000) / 1000;

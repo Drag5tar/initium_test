@@ -17,35 +17,65 @@ export class PlacementEngine {
       z: 0,
     },
   };
-  private firstObjectPosition: THREE.Vector3 = new THREE.Vector3(0, 0, 0);
-  private lastObjectPosition: THREE.Vector3 = new THREE.Vector3(0, 0, 0);
   private middlePoint?: THREE.Vector3;
-  private maximumCoordinate: THREE.Vector3 = new THREE.Vector3(0, 0, 0);
+  private contentBounds: THREE.Box3 = new THREE.Box3();
+  private contentCenter: THREE.Vector3 = new THREE.Vector3();
+  private contentSize: THREE.Vector3 = new THREE.Vector3();
+  private boundsMin: THREE.Vector3 = new THREE.Vector3(
+    Infinity,
+    Infinity,
+    Infinity,
+  );
+  private boundsMax: THREE.Vector3 = new THREE.Vector3(
+    -Infinity,
+    -Infinity,
+    -Infinity,
+  );
+  private hasBounds: boolean = false;
 
   constructor(options: PlacementEngineOptions) {
     this.options = options;
-  }
-
-  setFirstObjectPosition(x: number, y: number, z: number) {
-    this.firstObjectPosition = new THREE.Vector3(x, y, z);
-  }
-
-  setLastObjectPosition(x: number, y: number, z: number) {
-    this.lastObjectPosition = new THREE.Vector3(x, y, z);
-    this.updateMaximumCoordinate(x, y, z);
-  }
-
-  updateMaximumCoordinate(x: number, y: number, z: number) {
-    if (x > this.maximumCoordinate.x) this.maximumCoordinate.setX(x);
-    if (y > this.maximumCoordinate.y) this.maximumCoordinate.setY(y);
-    if (z > this.maximumCoordinate.z) this.maximumCoordinate.setZ(z);
   }
 
   public setMaxRowWidth(width: number) {
     this.options.maxRowWidth = width;
   }
 
+  private resetDerivedState() {
+    this.middlePoint = undefined;
+
+    this.boundsMin.set(Infinity, Infinity, Infinity);
+    this.boundsMax.set(-Infinity, -Infinity, -Infinity);
+    this.contentBounds.makeEmpty();
+    this.contentCenter.set(0, 0, 0);
+    this.contentSize.set(0, 0, 0);
+    this.hasBounds = false;
+  }
+
+  private updateBounds(shop: Shop, position: THREE.Vector3) {
+    const halfW = shop.width / 2;
+    const halfH = shop.height / 2;
+    const halfD = shop.depth / 2;
+
+    this.boundsMin.set(
+      Math.min(this.boundsMin.x, position.x - halfW),
+      Math.min(this.boundsMin.y, position.y - halfH),
+      Math.min(this.boundsMin.z, position.z - halfD),
+    );
+    this.boundsMax.set(
+      Math.max(this.boundsMax.x, position.x + halfW),
+      Math.max(this.boundsMax.y, position.y + halfH),
+      Math.max(this.boundsMax.z, position.z + halfD),
+    );
+
+    this.hasBounds = true;
+    this.contentBounds.set(this.boundsMin, this.boundsMax);
+    this.contentBounds.getCenter(this.contentCenter);
+    this.contentBounds.getSize(this.contentSize);
+  }
+
   public linePacking() {
+    this.resetDerivedState();
     let lastPosition = this.options.startPosition;
     let maxRowDepth = 0;
 
@@ -56,44 +86,37 @@ export class PlacementEngine {
         xPos =
           this.options.startPosition.x + this.options.gutter + shop.width / 2;
         zPos = lastPosition.z + maxRowDepth + this.options.gutter;
+        maxRowDepth = 0;
       }
       const yPos = shop.height / 2;
       if (maxRowDepth < shop.depth) maxRowDepth = shop.depth;
-      if (lastPosition === this.options.startPosition) {
-        this.setFirstObjectPosition(xPos, yPos, zPos);
-      }
       lastPosition = { x: xPos + shop.width / 2, y: 1, z: zPos };
-      this.setLastObjectPosition(xPos, yPos, zPos);
-      return new THREE.Vector3(xPos, yPos, zPos);
+      const position = new THREE.Vector3(xPos, yPos, zPos);
+      this.updateBounds(shop, position);
+      return position;
     };
   }
 
-  public getFirstObjectPosition() {
-    return this.firstObjectPosition;
-  }
-
-  public getLastObjectPosition() {
-    return this.lastObjectPosition;
-  }
-  public getMaxPosition() {
-    return this.maximumCoordinate;
-  }
-
   public getMiddlePoint() {
-    console.log(
-      "gmp",
-      this.firstObjectPosition,
-      this.maximumCoordinate,
-      this.middlePoint,
-    );
-    if (this.middlePoint) return this.middlePoint;
-    if (!this.firstObjectPosition || !this.maximumCoordinate)
-      return new THREE.Vector3(0, 0, 0);
-    this.middlePoint = new THREE.Vector3().lerpVectors(
-      this.firstObjectPosition,
-      this.maximumCoordinate,
-      0.5,
+    if (this.middlePoint) return this.middlePoint.clone();
+    if (!this.hasBounds) return new THREE.Vector3(0, 0, 0);
+    this.middlePoint = new THREE.Vector3(
+      this.contentCenter.x,
+      0,
+      this.contentCenter.z,
     );
     return this.middlePoint.clone();
+  }
+
+  public getContentBounds() {
+    return this.contentBounds.clone();
+  }
+
+  public getContentCenter() {
+    return this.contentCenter.clone();
+  }
+
+  public getContentSize() {
+    return this.contentSize.clone();
   }
 }

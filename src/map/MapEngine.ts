@@ -1,11 +1,6 @@
 import * as THREE from "three";
-import {
-  computeBoundsTree,
-  disposeBoundsTree,
-  acceleratedRaycast,
-} from "three-mesh-bvh";
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import Stats from "stats.js";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { InstanceGroups, ModifiedShop, Shop } from "../lib/types";
 import { PlacementEngine } from "./PlacementEngine";
 import { throttle } from "../lib/helpers";
@@ -16,75 +11,76 @@ import { PerspectiveSwitch } from "./AnimationEngine";
 // } from "./AnimationEngine";
 
 export class MapEngine {
+  private data: ModifiedShop[] = [];
   private readonly container: HTMLElement;
   private sceneSize!: { width: number; height: number };
-  renderer!: THREE.WebGLRenderer;
-  scene!: THREE.Scene;
-  raycaster = new THREE.Raycaster();
-  controls!: OrbitControls;
-  color = new THREE.Color();
-  mouse = new THREE.Vector2(1, 1);
+  private renderer!: THREE.WebGLRenderer;
+  private renderer2d!: CSS2DRenderer;
+  private scene!: THREE.Scene;
+  private raycaster = new THREE.Raycaster();
+  private color = new THREE.Color();
+  private mouse = new THREE.Vector2(1, 1);
 
-  ortographicCamera!: THREE.OrthographicCamera;
-  perspectiveCamera!: THREE.PerspectiveCamera;
-  camera!: THREE.OrthographicCamera | THREE.PerspectiveCamera;
-  topViewPoint: THREE.Vector3 = new THREE.Vector3(0, 0, 0);
-  perspectiveViewPoint: THREE.Vector3 = new THREE.Vector3(-45, 60, -55);
-  topViewRotation: THREE.Quaternion = new THREE.Quaternion();
-  perspectiveViewRotation: THREE.Quaternion = new THREE.Quaternion();
-  middlePoint: THREE.Vector3 = new THREE.Vector3(0, 0, 0);
-  perspectiveSwitch!: PerspectiveSwitch;
+  private ortographicCamera!: THREE.OrthographicCamera;
+  private perspectiveCamera!: THREE.PerspectiveCamera;
+  private topViewPoint: THREE.Vector3 = new THREE.Vector3(0, 0, 0);
+  private perspectiveViewPoint: THREE.Vector3 = new THREE.Vector3(-55, 60, -65);
+  private middlePoint: THREE.Vector3 = new THREE.Vector3(0, 0, 0);
+  private perspectiveSwitch!: PerspectiveSwitch;
+  private contentCenter: THREE.Vector3 = new THREE.Vector3();
+  private contentSize: THREE.Vector3 = new THREE.Vector3();
+  private matchPerspectiveFov: number = 35;
 
-  stats = new Stats();
+  private stats = new Stats();
 
-  instanceGroups: InstanceGroups = {};
-  instanceGroupsMeshes: THREE.InstancedMesh[] = [];
-  lastHovered?: ModifiedShop;
-  selectedShop?: ModifiedShop;
+  private instanceGroups: InstanceGroups = {};
+  private instanceGroupsMeshes: THREE.InstancedMesh[] = [];
+  private shopsGroup: THREE.Group = new THREE.Group();
+  private lastHovered?: ModifiedShop;
+  private selectedShop?: ModifiedShop;
 
   private placementEngine: PlacementEngine = new PlacementEngine({
-    gutter: 1,
+    gutter: 0.5,
     maxRowWidth: 150,
     startPosition: { x: -25, y: 1, z: 0 },
   });
 
   constructor(container: HTMLElement, data: Shop[]) {
     this.container = container;
-    this.placementEngine.setMaxRowWidth(data.length / 2);
-    this.organizeData(data);
+    this.placementEngine.setMaxRowWidth(Math.max(data.length / 5, 50));
+    this.data = this.organizeData(data);
     this.init();
   }
 
   init() {
     const containerSize = this.container.getBoundingClientRect();
-    console.log(containerSize);
     this.sceneSize = {
       width: containerSize.width,
       height: containerSize.height,
     };
-    THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
-    THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
-    THREE.Mesh.prototype.raycast = acceleratedRaycast;
-    this.raycaster.firstHitOnly = true;
-
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setAnimationLoop(this.animate.bind(this));
+    this.renderer2d = new CSS2DRenderer();
+    this.renderer2d.setSize(window.innerWidth, window.innerHeight);
+    this.renderer2d.domElement.style.position = 'absolute';
+    this.renderer2d.domElement.style.zIndex = '2';
+    this.renderer2d.domElement.style.top = '0px';
+    this.renderer2d.domElement.id = '2dlayer';
     this.container.appendChild(this.renderer.domElement);
+    this.container.appendChild(this.renderer2d.domElement);
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x202020);
     const light = new THREE.HemisphereLight(0xffffff, 0x888888, 3);
     light.position.set(0, 1, 0);
     this.scene.add(light);
     this.setupCameras();
-    // this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    // this.controls.update();
     this.stats.showPanel(0);
     document.body.appendChild(this.stats.dom);
     window.addEventListener("resize", this.onWindowResize.bind(this));
     this.container.addEventListener("mousemove", (e: MouseEvent) =>
-      throttle(this.onMouseMove.bind(this), 5)(e),
+      throttle(this.onMouseMove.bind(this), 10)(e),
     );
     this.container.addEventListener("click", this.onClick.bind(this));
     document.body.addEventListener("keyup", (e) => {
@@ -99,14 +95,16 @@ export class MapEngine {
     const getCoordinates = this.placementEngine.linePacking();
     data.forEach((shop) => {
       const instanceKey = `${shop.width}_${shop.depth}_${shop.height}`;
+      const position = getCoordinates(shop);
       const shopInstance: ModifiedShop = {
         ...shop,
         ...{
           instanceKey: instanceKey,
-          position: getCoordinates(shop),
+          position,
         },
       };
       ouptut.push(shopInstance);
+
       if (Object.keys(this.instanceGroups).includes(instanceKey)) {
         this.instanceGroups[instanceKey].children.push(shopInstance);
         shopInstance.instanceId =
@@ -121,6 +119,12 @@ export class MapEngine {
         };
       }
     });
+
+    if (ouptut.length > 0) {
+      this.contentCenter.copy(this.placementEngine.getContentCenter());
+      this.contentSize.copy(this.placementEngine.getContentSize());
+      this.middlePoint.copy(this.placementEngine.getMiddlePoint());
+    }
     return ouptut;
   }
 
@@ -132,7 +136,6 @@ export class MapEngine {
         group.height,
         group.depth,
       );
-      geometry.computeBoundsTree();
       const material = new THREE.MeshStandardMaterial({ color: 0xffffff });
       const mesh = new THREE.InstancedMesh(
         geometry,
@@ -141,7 +144,7 @@ export class MapEngine {
       );
       group.mesh = mesh;
       mesh.userData["id"] = key;
-      this.scene.add(group.mesh);
+      this.shopsGroup.add(group.mesh);
       const matrix = new THREE.Matrix4();
       group.children.forEach((shop, index) => {
         if (!shop.instanceId) shop.instanceId = index;
@@ -151,38 +154,71 @@ export class MapEngine {
         mesh.instanceMatrix.needsUpdate = true;
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       });
-      if (!this.instanceGroupsMeshes.includes(group.mesh))
-        this.instanceGroupsMeshes.push(group.mesh);
     });
+    this.scene.add(this.shopsGroup);
+  }
+
+  private updateCameraFraming() {
+    const padding = 1.1;
+    const aspect = this.sceneSize.width / this.sceneSize.height;
+
+    const contentWidth = Math.max(1, this.contentSize.x) * padding;
+    const contentHeight = Math.max(1, this.contentSize.z) * padding;
+
+    let halfW = contentWidth / 2;
+    let halfH = contentHeight / 2;
+
+    if (halfW / halfH < aspect) {
+      halfW = halfH * aspect;
+    } else {
+      halfH = halfW / aspect;
+    }
+
+    this.ortographicCamera.left = -halfW;
+    this.ortographicCamera.right = halfW;
+    this.ortographicCamera.top = halfH;
+    this.ortographicCamera.bottom = -halfH;
+    this.ortographicCamera.near = -2000;
+    this.ortographicCamera.far = 4000;
+    this.ortographicCamera.zoom = 1;
+
+    const targetFov = this.matchPerspectiveFov;
+    const distance = halfH / Math.tan(THREE.MathUtils.degToRad(targetFov / 2));
+    this.topViewPoint.set(
+      this.contentCenter.x,
+      Math.max(10, distance),
+      this.contentCenter.z,
+    );
+
+    this.perspectiveCamera.fov = targetFov;
+    this.perspectiveCamera.aspect = aspect;
+    this.perspectiveCamera.near = Math.max(0.1, distance / 100);
+    this.perspectiveCamera.far = Math.max(5000, distance * 10);
+
+    this.ortographicCamera.position.copy(this.topViewPoint);
+    this.perspectiveCamera.position.copy(this.perspectiveViewPoint);
+
+    this.ortographicCamera.up.set(0, 0, -1);
+    this.ortographicCamera.lookAt(this.middlePoint);
+    this.perspectiveCamera.lookAt(this.middlePoint);
+
+    this.ortographicCamera.updateProjectionMatrix();
+    this.perspectiveCamera.updateProjectionMatrix();
   }
 
   setupCameras() {
-    this.topViewPoint = this.placementEngine.getMiddlePoint();
-    this.middlePoint = this.placementEngine.getMiddlePoint();
-    this.topViewPoint.y = 100;
-    this.middlePoint.y = 0;
-    this.perspectiveCamera = new THREE.PerspectiveCamera(
-      35,
-      window.innerWidth / window.innerHeight,
-      0.1,
-      1000,
-    );
-    // const scaleMultiplier = 20;
+    this.perspectiveCamera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
     this.ortographicCamera = new THREE.OrthographicCamera(
-      this.sceneSize.width / -2,
-      this.sceneSize.width / 2,
-      this.sceneSize.height / 2,
-      this.sceneSize.height / -2,
+      -1,
+      1,
+      1,
+      -1,
       -500,
       1500,
     );
-    this.ortographicCamera.zoom = 10;
-    this.perspectiveCamera.position.copy(this.perspectiveViewPoint);
-    this.ortographicCamera.position.copy(this.topViewPoint);
-    this.perspectiveCamera.lookAt(this.middlePoint);
-    this.ortographicCamera.lookAt(this.middlePoint);
-    this.perspectiveCamera.updateProjectionMatrix();
-    this.ortographicCamera.updateProjectionMatrix();
+
+    this.updateCameraFraming();
+
     this.scene.add(this.perspectiveCamera);
     this.scene.add(this.ortographicCamera);
     this.perspectiveSwitch = new PerspectiveSwitch(
@@ -197,19 +233,6 @@ export class MapEngine {
       "3d",
     );
     this.perspectiveSwitch.getCamera();
-    // const upVector = new THREE.Vector3(0, 10, 0);
-    // const topViewMatrix = new THREE.Matrix4().lookAt(
-    //   this.topViewPoint,
-    //   this.middlePoint,
-    //   upVector,
-    // );
-    // const perspectiveViewMatrix = new THREE.Matrix4().lookAt(
-    //   this.perspectiveViewPoint,
-    //   this.middlePoint,
-    //   upVector,
-    // );
-    // this.topViewRotation.setFromRotationMatrix(topViewMatrix);
-    // this.perspectiveViewRotation.setFromRotationMatrix(perspectiveViewMatrix);
   }
 
   setShopColor(shop: ModifiedShop, color: number) {
@@ -231,11 +254,17 @@ export class MapEngine {
   }
 
   checkIntersections() {
-    console.log('checking intersections');
-    this.raycaster.setFromCamera(this.mouse, this.perspectiveSwitch.getCamera());
+    this.raycaster.setFromCamera(
+      this.mouse,
+      this.perspectiveSwitch.getCamera(),
+    );
+    if (
+      !this.raycaster.ray.intersectsBox(this.placementEngine.getContentBounds())
+    )
+      return;
 
-    const intersections = this.raycaster.intersectObjects(
-      this.instanceGroupsMeshes,
+    const intersections = this.raycaster.intersectObject(
+      this.shopsGroup,
     );
 
     if (intersections.length > 0) {
@@ -268,18 +297,26 @@ export class MapEngine {
   }
 
   onWindowResize() {
-    this.perspectiveCamera.aspect = window.innerWidth / window.innerHeight;
-    this.perspectiveSwitch.getCamera().updateProjectionMatrix();
+    const containerSize = this.container.getBoundingClientRect();
+    this.sceneSize = {
+      width: containerSize.width,
+      height: containerSize.height,
+    };
+    this.updateCameraFraming();
 
     this.renderer.setSize(window.innerWidth, window.innerHeight);
   }
   onMouseMove(event: MouseEvent) {
     event.preventDefault();
 
+    const prevPosition = this.mouse.clone();
+
     this.mouse.x =
       (event.clientX / this.container.getBoundingClientRect().width) * 2 - 1;
     this.mouse.y =
       -(event.clientY / this.container.getBoundingClientRect().height) * 2 + 1;
+
+    if (prevPosition.distanceTo(this.mouse) < 0.0008) return;
 
     this.checkIntersections();
   }
@@ -301,28 +338,13 @@ export class MapEngine {
       Name: this.selectedShop.name,
       Position: this.selectedShop.position,
     });
-    this.animate();
   }
 
-//   resetInactiveCamera() {
-//     const camera =
-//       this.activeCamera === "2d"
-//         ? this.perspectiveCamera
-//         : this.ortographicCamera;
-//     if (this.activeCamera === "2d") {
-//       camera.position.copy(this.perspectiveViewPoint);
-//       camera.quaternion.copy(this.perspectiveViewRotation);
-//     } else {
-//       camera.position.copy(this.topViewPoint);
-//       camera.quaternion.copy(this.topViewRotation);
-//     }
-//   }
-
   toggleView(e: KeyboardEvent) {
-    console.log(e);
     if (e.code !== "Space") return;
     e.preventDefault();
-    console.log(this.camera);
-    this.perspectiveSwitch?.changePerspective()
+    this.perspectiveSwitch?.changePerspective(undefined, {
+      matchFov: this.matchPerspectiveFov,
+    });
   }
 }
