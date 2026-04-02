@@ -6,3 +6,23 @@ body {
 .fh {
   height: 100vh;
 }
+.label {
+  display: grid;
+  place-items: center center;
+  font-size: .6rem;
+  color: #fff;
+  font-family: monospace;
+  text-align: center;
+  overflow-wrap: anywhere;
+  transition: color .15s ease-in-out, font-weight .15s ease-in-out;
+  z-index: 1;
+  &.hovered {
+    color: black;
+    font-weight: bold;
+    z-index: 2;
+  }
+  &.selected {
+    color: #fff;
+    font-weight: bold;
+  }
+}

@@ -3,9 +3,9 @@ import { getRandomInt } from "./helpers";
 import type { GeneratorOptions, Shop } from "./types";
 
 const defaultOptions: GeneratorOptions = {
-    minWidth: 3,
+    minWidth: 5,
     maxWidth: 8,
-    minDepth: 3,
+    minDepth: 5,
     maxDepth: 6,
     height: 2,
 }

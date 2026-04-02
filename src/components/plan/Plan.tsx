@@ -5,7 +5,7 @@ import { MapEngine } from "../../map/MapEngine";
 
 export const Plan = () => {
     const containerRef = useRef(null);
-    const [data] = useState<Shop[]>(generateData());
+    const [data] = useState<Shop[]>(generateData(200));
     const [map, setMap] = useState<MapEngine | null>(null);
 
 

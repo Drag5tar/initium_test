@@ -1,16 +1,27 @@
 import * as THREE from "three";
 import type { Shop } from "../lib/types";
 
-export type PlacementEngineOptions = {
+export type PlacementEngineOptions = LinePackingOptions | GridPackingOptions;
+
+export type LinePackingOptions = {
   gutter: number;
   maxRowWidth: number;
   startPosition: { x: number; y: number; z: number };
 };
+export type GridPackingOptions = {
+  gutter: number;
+  maxShopWidth: number;
+  maxShopDepth: number;
+  gridSize: { width: number; depth: number };
+  startPosition: { x: number; y: number; z: number };
+}
 
 export class PlacementEngine {
   options: PlacementEngineOptions = {
     gutter: 1,
-    maxRowWidth: 200,
+    maxRowWidth: 100,
+    maxShopWidth: 9,
+    maxShopDepth: 6,
     startPosition: {
       x: 0,
       y: 0,
@@ -38,7 +49,9 @@ export class PlacementEngine {
   }
 
   public setMaxRowWidth(width: number) {
-    this.options.maxRowWidth = width;
+    if ('maxRowWidth' in this.options) {
+      this.options.maxRowWidth = width;
+    }
   }
 
   private resetDerivedState() {
@@ -80,6 +93,7 @@ export class PlacementEngine {
     let maxRowDepth = 0;
 
     return (shop: Shop): THREE.Vector3 => {
+      if (!('maxRowWidth' in this.options)) throw new Error('Passed wrong options for line packing');
       let xPos = lastPosition.x + this.options.gutter + shop.width / 2;
       let zPos = lastPosition.z;
       if (xPos + shop.width / 2 > this.options.maxRowWidth) {
@@ -95,6 +109,29 @@ export class PlacementEngine {
       this.updateBounds(shop, position);
       return position;
     };
+  }
+
+  public gridPacking() {
+    if (!('maxShopWidth' in this.options) || !('maxShopDepth' in this.options)) throw new Error('Passed wrong options for line packing');
+    this.resetDerivedState();
+    let lastPosition = this.options.startPosition;
+    const maxWidth = this.options.maxShopWidth;
+    const maxDepth = this.options.maxShopDepth;
+    const gridSize = this.options.gridSize;
+    return (shop: Shop): THREE.Vector3 => {
+      if (!('maxShopWidth' in this.options) || !('maxShopDepth' in this.options)) throw new Error('Passed wrong options for line packing');
+      let xPos = lastPosition.x + maxWidth / 2 + this.options.gutter;
+      let zPos = lastPosition.z;
+      if (xPos + maxWidth > gridSize.width) {
+        xPos = this.options.startPosition.x + maxWidth / 2 + this.options.gutter;
+        zPos = lastPosition.z + maxDepth + this.options.gutter;
+      }
+      const yPos = shop.height / 2;
+      lastPosition = { x: xPos + maxWidth, y: 1, z: zPos };
+      const position = new THREE.Vector3(xPos, yPos, zPos);
+      this.updateBounds(shop, position);
+      return position;
+    }
   }
 
   public getMiddlePoint() {

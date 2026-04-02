@@ -1,22 +1,19 @@
 import * as THREE from "three";
-import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import Stats from "stats.js";
 import type { InstanceGroups, ModifiedShop, Shop } from "../lib/types";
 import { PlacementEngine } from "./PlacementEngine";
-import { throttle } from "../lib/helpers";
+import { ShopLabelsEngine } from "./ShopLabelsEngine";
 import { PerspectiveSwitch } from "./AnimationEngine";
-// import {
-//   CameraAnimationEngine,
-//   type PositionAnimation,
-// } from "./AnimationEngine";
+import { throttle } from "../lib/helpers";
 
 export class MapEngine {
-//   private data: ModifiedShop[] = [];
+  private data: ModifiedShop[] = [];
   private readonly container: HTMLElement;
+  private readonly packingType: "line" | "grid" = "line";
   private sceneSize!: { width: number; height: number };
   private renderer!: THREE.WebGLRenderer;
-  private renderer2d!: CSS2DRenderer;
   private scene!: THREE.Scene;
+  private shopLabelsEngine!: ShopLabelsEngine;
   private raycaster = new THREE.Raycaster();
   private color = new THREE.Color();
   private mouse = new THREE.Vector2(1, 1);
@@ -24,30 +21,40 @@ export class MapEngine {
   private ortographicCamera!: THREE.OrthographicCamera;
   private perspectiveCamera!: THREE.PerspectiveCamera;
   private topViewPoint: THREE.Vector3 = new THREE.Vector3(0, 0, 0);
-  private perspectiveViewPoint: THREE.Vector3 = new THREE.Vector3(-55, 60, -65);
+  private perspectiveViewPoint: THREE.Vector3 = new THREE.Vector3(-65, 60, -70);
   private middlePoint: THREE.Vector3 = new THREE.Vector3(0, 0, 0);
   private perspectiveSwitch!: PerspectiveSwitch;
   private contentCenter: THREE.Vector3 = new THREE.Vector3();
   private contentSize: THREE.Vector3 = new THREE.Vector3();
-  private matchPerspectiveFov: number = 35;
+  private matchPerspectiveFov: number = 30;
 
   private stats = new Stats();
 
   private instanceGroups: InstanceGroups = {};
   private shopsGroup: THREE.Group = new THREE.Group();
+  private readonly shopsById = new Map<string, ModifiedShop>();
+  private readonly shopsByName = new Map<string, ModifiedShop[]>();
   private lastHovered?: ModifiedShop;
   private selectedShop?: ModifiedShop;
 
   private placementEngine: PlacementEngine = new PlacementEngine({
     gutter: 0.5,
-    maxRowWidth: 150,
+    maxRowWidth: 250,
+    maxShopWidth: 8,
+    maxShopDepth: 6,
     startPosition: { x: -25, y: 1, z: 0 },
+    gridSize: { width: 100, depth: 100 },
   });
 
-  constructor(container: HTMLElement, data: Shop[]) {
+  constructor(
+    container: HTMLElement,
+    data: Shop[],
+    packingType?: "line" | "grid",
+  ) {
     this.container = container;
-    this.placementEngine.setMaxRowWidth(Math.max(data.length / 5, 50));
-    this.organizeData(data);
+    this.placementEngine.setMaxRowWidth(Math.max(data.length / 4, 75));
+    this.packingType = packingType || "line";
+    this.data = this.organizeData(data);
     this.init();
   }
 
@@ -61,22 +68,26 @@ export class MapEngine {
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setAnimationLoop(this.animate.bind(this));
-    this.renderer2d = new CSS2DRenderer();
-    this.renderer2d.setSize(window.innerWidth, window.innerHeight);
-    this.renderer2d.domElement.style.position = 'absolute';
-    this.renderer2d.domElement.style.zIndex = '2';
-    this.renderer2d.domElement.style.top = '0px';
-    this.renderer2d.domElement.id = '2dlayer';
+
     this.container.appendChild(this.renderer.domElement);
-    this.container.appendChild(this.renderer2d.domElement);
+
+    this.shopLabelsEngine = new ShopLabelsEngine(this.container);
+
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x202020);
+
     const light = new THREE.HemisphereLight(0xffffff, 0x888888, 3);
     light.position.set(0, 1, 0);
     this.scene.add(light);
+
     this.setupCameras();
     this.stats.showPanel(0);
     document.body.appendChild(this.stats.dom);
+
+    this.generateGeometry();
+    this.shopLabelsEngine.buildLabels(this.data);
+    this.scene.add(this.shopLabelsEngine.group);
+
     window.addEventListener("resize", this.onWindowResize.bind(this));
     this.container.addEventListener("mousemove", (e: MouseEvent) =>
       throttle(this.onMouseMove.bind(this), 10)(e),
@@ -85,13 +96,16 @@ export class MapEngine {
     document.body.addEventListener("keyup", (e) => {
       this.toggleView(e);
     });
-
-    this.generateGeometry();
   }
 
   private organizeData(data: Shop[]) {
     const ouptut: ModifiedShop[] = [];
-    const getCoordinates = this.placementEngine.linePacking();
+    this.shopsById.clear();
+    this.shopsByName.clear();
+    const getCoordinates =
+      this.packingType === "line"
+        ? this.placementEngine.linePacking()
+        : this.placementEngine.gridPacking();
     data.forEach((shop) => {
       const instanceKey = `${shop.width}_${shop.depth}_${shop.height}`;
       const position = getCoordinates(shop);
@@ -205,7 +219,7 @@ export class MapEngine {
     this.perspectiveCamera.updateProjectionMatrix();
   }
 
-  setupCameras() {
+  private setupCameras() {
     this.perspectiveCamera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
     this.ortographicCamera = new THREE.OrthographicCamera(
       -1,
@@ -234,25 +248,7 @@ export class MapEngine {
     this.perspectiveSwitch.getCamera();
   }
 
-  setShopColor(shop: ModifiedShop, color: number) {
-    if (shop.instanceId === undefined) return;
-    const mesh = this.instanceGroups[shop.instanceKey].mesh;
-    if (!mesh || !mesh.instanceColor) return;
-    mesh.setColorAt(shop.instanceId, this.color.setHex(color));
-    mesh.instanceColor.needsUpdate = true;
-  }
-
-  resetLastHoveredColor() {
-    if (
-      !this.lastHovered ||
-      this.lastHovered.instanceId === undefined ||
-      this.lastHovered.id === this.selectedShop?.id
-    )
-      return;
-    this.setShopColor(this.lastHovered, this.lastHovered.color);
-  }
-
-  checkIntersections() {
+  private checkIntersections() {
     this.raycaster.setFromCamera(
       this.mouse,
       this.perspectiveSwitch.getCamera(),
@@ -262,9 +258,7 @@ export class MapEngine {
     )
       return;
 
-    const intersections = this.raycaster.intersectObject(
-      this.shopsGroup,
-    );
+    const intersections = this.raycaster.intersectObject(this.shopsGroup);
 
     if (intersections.length > 0) {
       const intersection = intersections[0];
@@ -283,19 +277,34 @@ export class MapEngine {
 
       this.resetLastHoveredColor();
       this.lastHovered = shop;
+      this.shopLabelsEngine.setHoveredShop(shop);
     } else {
       this.resetLastHoveredColor();
       this.lastHovered = undefined;
+      this.shopLabelsEngine.setHoveredShop(undefined);
     }
   }
 
   private animate() {
-    this.renderer.render(this.scene, this.perspectiveSwitch.getCamera());
+    const cam = this.perspectiveSwitch.getCamera();
+    this.renderer.render(this.scene, cam);
+    this.shopLabelsEngine.updateLayout(cam, this.renderer.domElement);
+    this.shopLabelsEngine.render(this.scene, cam);
     this.perspectiveSwitch?.update();
     this.stats.update();
   }
 
-  onWindowResize() {
+
+  public toggleView(e: KeyboardEvent) {
+    if (e.code !== "Space") return;
+    e.preventDefault();
+    this.perspectiveSwitch?.changePerspective(undefined, {
+      matchFov: this.matchPerspectiveFov,
+    });
+  }
+
+  // Event handlers
+  private onWindowResize() {
     const containerSize = this.container.getBoundingClientRect();
     this.sceneSize = {
       width: containerSize.width,
@@ -304,8 +313,13 @@ export class MapEngine {
     this.updateCameraFraming();
 
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.shopLabelsEngine.setSize(window.innerWidth, window.innerHeight);
+    const cam = this.perspectiveSwitch.getCamera();
+    this.shopLabelsEngine.updateLayout(cam, this.renderer.domElement);
+    this.shopLabelsEngine.render(this.scene, cam);
   }
-  onMouseMove(event: MouseEvent) {
+
+  private onMouseMove(event: MouseEvent) {
     event.preventDefault();
 
     const prevPosition = this.mouse.clone();
@@ -319,7 +333,8 @@ export class MapEngine {
 
     this.checkIntersections();
   }
-  onClick() {
+
+  private onClick() {
     this.checkIntersections();
     if (
       !this.lastHovered ||
@@ -332,6 +347,7 @@ export class MapEngine {
     }
     this.selectedShop = this.lastHovered;
     this.setShopColor(this.selectedShop, 0xee9bd4);
+    this.shopLabelsEngine.setSelectedShop(this.selectedShop);
     console.table({
       ID: this.selectedShop.id,
       Name: this.selectedShop.name,
@@ -339,11 +355,30 @@ export class MapEngine {
     });
   }
 
-  toggleView(e: KeyboardEvent) {
-    if (e.code !== "Space") return;
-    e.preventDefault();
-    this.perspectiveSwitch?.changePerspective(undefined, {
-      matchFov: this.matchPerspectiveFov,
-    });
+  // Helpers
+  public getShopById(id: string) {
+    return this.shopsById.get(id);
+  }
+
+  public getShopsByName(name: string) {
+    return this.shopsByName.get(name) || [];
+  }
+
+  private setShopColor(shop: ModifiedShop, color: number) {
+    if (shop.instanceId === undefined) return;
+    const mesh = this.instanceGroups[shop.instanceKey].mesh;
+    if (!mesh || !mesh.instanceColor) return;
+    mesh.setColorAt(shop.instanceId, this.color.setHex(color));
+    mesh.instanceColor.needsUpdate = true;
+  }
+
+  private resetLastHoveredColor() {
+    if (
+      !this.lastHovered ||
+      this.lastHovered.instanceId === undefined ||
+      this.lastHovered.id === this.selectedShop?.id
+    )
+      return;
+    this.setShopColor(this.lastHovered, this.lastHovered.color);
   }
 }

@@ -1,73 +1,94 @@
-# React + TypeScript + Vite
+# Тестовое задание Инициум
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## Прототип визуализации торгового центра с 200 магазинами, переключением 2D/3D проекций и подписями.
 
-Currently, two official plugins are available:
+### Забельский Андрей tg: *@AndreyZabelsky*
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+### Ссылка на демо: https://initium-test-two.vercel.app/
 
-## React Compiler
+### Стек: ThreeJS, TypeScript, React.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### Запуск:
+Склонировать репозиторий: https://github.com/Drag5tar/initium_test.git
+Установить зависимости: npm i
+Запустить тестовый сервер: npm run dev
+Открыть: http://localhost:5173/ 
 
-## Expanding the ESLint configuration
+### Управление
+Переключение между проекциями осуществляется на нажатие кнопки Пробел.
+При клике на магазин информация выводится в консоль.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Структура проекта:
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+```text
+src/
+  main.tsx
+    Точка входа в React.
+  App.tsx
+    Корневой компонент приложения (рендерит `Plan`).
+  index.css, App.css
+    Глобальные стили.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+  lib/
+    data.ts
+      Хранение набора имен магазинов и цветовой палитры.
+    dataGenerator.ts
+      Генерация набора магазинов (id/name/размеры/цвет).
+    helpers.ts
+      Вспомогательные утилиты.
+    types.ts
+      Типы данных.
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+  components/
+    plan/
+      Plan.tsx
+        React-компонент: создаёт и отрисовывает UI.
+
+  map/
+    MapEngine.ts
+      Основной ThreeJS-движок: сцена, камеры (2D/3D), raycaster, подсветка hovered/selected.
+    PlacementEngine.ts
+      Алгоритмы размещения магазинов и расчёт получившихся границ.
+    AnimationEngine.ts
+      Логика переключения проекций (2D <-> 3D).
+    ShopLabelsEngine.ts
+      Подписи магазинов поверх через CSS2DRenderer + подсветка hovered/selected.
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Архитектура и оптимизация
+**Описание текущих решений и перспектив к масштабированию:**
+Для предварительной оптимизации на данный момент магазины с одинаковыми размерами сгруппированы через InstancedMesh, так как на данный момент нет нужды в использовании различных геометрий и материалов.
+Хоть InstancedMesh имеет некоторые ограничения (например, с изменением прозрачности и отсечением геометрии), часть этих проблем можно решить с помощью https://github.com/agargaro/instanced-mesh
+На данный момент в этом нет необходимости
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Так как для расчета позиции ортографической камеры вычисляется Box для всей группы магазинов, то raycaster просчитывает пересечения с магазинами только в том случае, если пересечен бокс "торгового центра".
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+Если геометрия магазинов будет усложняться, то имеет смысл попробовать BVH: https://github.com/gkjohnson/three-mesh-bvh
+В случае с простыми коробками сильного прироста эффективности я не заметил, скорее наоборот.
+
+PlacementEngine можно расширять, добавляя новые методы упаковки. На данный момент я не реализовал удобной системы выбора типа упаковки извне, но в дальнейшем это возможно.
+
+**Ответы на вопросы задания:**
+***Опишите (в комментариях или README), как вы оптимизируете рендеринг текстовых подписей, чтобы они не тормозили сцену при большом количестве***
+При небольшом (как сейчас) кол-ве магазинов вполне подходит CSS2DRenderer, так как он позволяет генерировать подписи как dom ноды, их легко стилизовать и они всегда обращены к камере.
+При большом кол-ве объектов это решение может вызвать просадки ФПС, особенно во время анимации. 
+Для большого количества магазинов можно попробовать сохранить все подписи в 1 текстуру и использовать ее как sprite. Но тогда текст будет растровым и может плохо выглядеть. 
+Возможно поможет использовать библиотеку https://protectwise.github.io/troika/troika-three-text/ , которая позволяет создает посимвольный атлас из шрифта и может рендерить любой текст качественно, но у нее тоже могут быть проблемы с производительностью.
+
+***Объясните, как вы будете обрабатывать клики по объектам при использовании оптимизаций (например, если объедините геометрию).***
+На данный момент я вижу два варианта:
+1. При объединении геометрии для каждого магазина записывать количество треугольников в массив объектов, где сохранены startIndex, endIndex и shopId. Например, faces от 0 до 20 принадлежат магазину shop_1. При пересечении получать faceIndex из intersection и искать в этом массиве нужный объект, в который этот faceIndex входит. Так как данные отсортированы, можно применить бинарный поиск.
+2. Может быть, можно рендерить отдельную невидимую сцену с простой геометрией и искать объекты в ней, а сцену со сложной геометрией и материалами объединить и использовать только для визуального отображения. Так как в условном плане ТЦ скорее всего не будет каких-то анимаций и перемещений, то синхронизировать две сцены будет проще.
+
+***Предложите структуру хранения данных на уровне JS, чтобы быстро находить объект по его ID или координатам.***
+Для быстрого нахождение объекта по ID можно использовать Map, тогда скорость доступа будет O(1). Для поиска по координатам можно использовать Spatial Hash, высчитывать квадраты на сетке торгового центра и сохранять магазины, находящиеся в каждом квадрате.
+К каждому квадрату вычитывать хэш. При вводе координат курсора высчитать хэш квадрата, в которой они находятся, найти его в общем Map по ключу и проверить координаты всех магазинов, входящих в него на вхождение в них искомых координат.
+
+### Описание алгоритма размещения
+Так как было не совсем понятны условия размещения объектов, а только то, что они не должны пересекаться, я решил пойти простым путем и не использовать сложные алгоритмы упаковки.
+Я написал два простых варианта упаковки: полинейной и в сетку. 
+
+При построени полинейно задана максимальная ширина строки, объекты размещаются друг за другом с определенным смещением, если следующий объект выходит за пределы максимальной ширины, то он переносится на следующую строку по Z и на стартовую позицию по X.
+Чтобы не было пересечений между линиями, в процессе добавления каждого магазина сохраняется значение максимальной глубины магазина. Перенос на следующую линию производится по формуле  ```zPos = lastPosition.z + maxRowDepth + gutter```.
+
+При построении в сетку задается размер клетки и размер сетки. Размер сетки в дальнейшем можно рассчитывать автоматически, сейчас это не реализовано. Каждый магазин ставится по центру клетки. Отличия от предыдущего алгоритма в том, что для расчета координат используется размер клетки, а не размер магазина.

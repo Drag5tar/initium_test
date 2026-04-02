@@ -147,7 +147,6 @@ export class PerspectiveSwitch {
   }
 
   onTransitionEnd() {
-    console.log("on end", this.animation);
     if (this.animation?.switchAtTheEnd) {
       this.currentPerspective = this.animation.switchAtTheEnd;
     }
